@@ -1,0 +1,86 @@
+# Create a vulnerable user with access keys
+# Give said user access to S3
+# Create an S3 bucket
+# Don't use in production without understanding implications
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for Cybr's Incident Response with CloudTrail and Athena course. This deploys a scenario for credentials compromise leading to S3 backdoor and data exfil
+
+Parameters:
+  ScenarioName:
+    Type: String
+    Default: 'cybrlab-ir-s3backdoorexfil'
+
+Resources:
+  # Our victim user with compromised access key
+  VictimUser:
+      Type: AWS::IAM::User
+      Properties:
+        UserName: Luke
+        Policies:
+          - PolicyName: GrantS3Access
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "s3:*"
+                  Resource: !Sub 'arn:aws:s3:::${LabSensitiveDataBucket}'
+                - Effect: Allow
+                  Action:
+                    - "s3:*"
+                  Resource: !Sub 'arn:aws:s3:::${LabSensitiveDataBucket}/*'
+
+  MyAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref VictimUser
+
+  # S3 bucket that will be our target
+  LabSensitiveDataBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub "cybrlab-sensitive-data-${AWS::AccountId}"
+      AccessControl: Private
+      Tags:
+        - Key: Description
+          Value: !Sub "Lab S3 Bucket used for storing fake sensitive customer data."
+        - Key: Stack
+          Value: !Sub ${AWS::StackName}
+        - Key: Scenario
+          Value: !Ref ScenarioName
+
+  # Example of an overly permissive policy. For a better example refer to: https://cybr.com/cloud-security/create-a-least-privilege-s3-bucket-policy/
+  MySensitiveDataBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref LabSensitiveDataBucket
+      PolicyDocument:
+        Id: SensitiveDataBucketPolicy
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccess
+            Effect: Allow
+            Action:
+              - 's3:*'
+            Resource: 
+              - !Sub 'arn:aws:s3:::${LabSensitiveDataBucket}/*'
+              - !Sub 'arn:aws:s3:::${LabSensitiveDataBucket}'
+            Principal: 
+              AWS: !Sub "${AWS::AccountId}"
+
+Outputs:
+  BucketName:
+    Description: "Name of bucket created"
+    Value: !Ref LabSensitiveDataBucket
+  AccessKeyId:
+    Description: "Compromised Access Key ID for the IAM user"
+    Value: !Ref MyAccessKey
+  SecretAccessKey:
+    Description: "Compromised Secret Access Key for the IAM user"
+    Value: !GetAtt MyAccessKey.SecretAccessKey
+  Username:
+    Description: "Compromised IAM Username"
+    Value: !Ref VictimUser
+    Export:
+      Name: 'Username'
